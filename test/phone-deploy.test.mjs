@@ -32,8 +32,8 @@ function stripComments(source) {
     .join('\n');
 }
 
-test('scripts/phone/ 四个入口都在', () => {
-  for (const file of ['install.sh', 'ctl.sh', 'supervise.sh', 'config-init.mjs']) {
+test('scripts/phone/ 的入口都在', () => {
+  for (const file of ['install.sh', 'ctl.sh', 'supervise.sh', 'config-init.mjs', 'fetch.sh']) {
     const full = path.join(phoneDir, file);
     assert.ok(fs.existsSync(full), `缺文件：scripts/phone/${file}`);
     const source = fs.readFileSync(full, 'utf8');
@@ -42,7 +42,7 @@ test('scripts/phone/ 四个入口都在', () => {
 });
 
 test('shell 入口都有 bash shebang 且先 set -uo pipefail', () => {
-  for (const file of ['install.sh', 'ctl.sh', 'supervise.sh']) {
+  for (const file of ['install.sh', 'ctl.sh', 'supervise.sh', 'fetch.sh']) {
     const source = read(file);
     assert.match(source.split('\n')[0], /^#!\/usr\/bin\/env bash$/, `${file} 首行应是 #!/usr/bin/env bash`);
     assert.match(source, /^set -uo pipefail$/m, `${file} 缺 set -uo pipefail`);
@@ -217,6 +217,56 @@ test('NapCat 模板用 websocketServers（正向），不能是 websocketClients
   assert.equal(http.enable, true);
   assert.equal(http.port, 3000, '与 onebot.httpUrl 默认端口一致');
   assert.ok(typeof http.token === 'string' && http.token.length > 0);
+});
+
+test('fetch.sh：token 只从环境变量读，不走命令行参数', () => {
+  // 命令行参数会出现在 `ps` 输出与 shell history 里；环境变量相对安全。
+  const source = read('fetch.sh');
+  const code = source.split('\n').filter((line) => !/^\s*#/.test(line) && !/^\s*>/.test(line)).join('\n');
+  // 只允许读环境变量（GITHUB_TOKEN / GH_TOKEN / QAP_GITHUB_TOKEN 任一）
+  assert.match(code, /TOKEN=["']?\$\{?\s*(GITHUB_TOKEN|GH_TOKEN|QAP_GITHUB_TOKEN)/,
+    'fetch.sh 应从环境变量（GITHUB_TOKEN / GH_TOKEN）读 token');
+  // 不允许有 --token 这种把密钥放命令行的选项
+  assert.ok(!/--token\b/.test(code),
+    '不要提供 --token 参数：它会进 shell history 和 ps 输出，应只用环境变量');
+  // 不允许把 token 写进任何文件
+  assert.ok(!/>>?\s*[^|\n]*\$TOKEN/i.test(code),
+    'fetch.sh 不该把 token 重定向写入文件');
+});
+
+test('fetch.sh：对私有仓库给的是 token/tarball 路线，不能让人裸 clone', () => {
+  const source = read('fetch.sh');
+  // 无 token 时要明确告诉用户：私人仓库必须带凭据
+  assert.match(source, /私人仓库|私有/, 'fetch.sh 的提示里应说明这是私人仓库、必须带 token');
+  // 用 API tarball 接口（不需要 git）
+  assert.match(source, /api\.github\.com\/repos\/\$OWNER\/\$REPO\/tarball/,
+    'fetch.sh 应走 GitHub API 的 tarball 接口（不需要 git）');
+  // 必须区分 401/403/404，否则用户只能猜
+  for (const code of ['401', '403', '404']) {
+    assert.ok(source.includes(code), `fetch.sh 应对 HTTP ${code} 给出单独说明`);
+  }
+});
+
+test('docs/PHONE.md：必须说明这是私人仓库、匿名 clone 会失败', () => {
+  const source = fs.readFileSync(path.join(repo, 'docs', 'PHONE.md'), 'utf8');
+  // 用户实测反馈：文档给 `git clone` 但仓库是私人的，手机上会卡在输密码
+  assert.match(source, /私人仓库|私有仓库/, '文档应明确说明仓库是私人的');
+  assert.match(source, /(匿名|直接)\s*(`?git clone`?|clone)/,
+    '文档应说明匿名 git clone 会要求凭据/失败');
+  // 加速站对私有仓库无效 —— 这条很容易踩，必须写
+  assert.match(source, /(加速|ghfast|gh-proxy)[^\n]*(无效|不带|只转发)/,
+    '文档应说明第三方 GitHub 加速对私人仓库无效');
+  // 至少要给出一条不需要在手机上放 token 的路线
+  assert.match(source, /(电脑|本机|桌面)[^\n]*(打包|tar)[^\n]*(传|拷)/,
+    '文档应给出「电脑打包传手机」这条不需要手机放 token 的路线');
+});
+
+test('docs/PHONE.md：token 安全提示到位', () => {
+  const source = fs.readFileSync(path.join(repo, 'docs', 'PHONE.md'), 'utf8');
+  assert.match(source, /settings\/tokens/, '应给出 token 管理页面地址');
+  assert.match(source, /(吊销|revoke)/i, '应提醒用完吊销 token');
+  assert.match(source, /(只读|Read-only)/i, '应建议手机上用只读 token');
+  assert.match(source, /明文/, '用 credential store 时应警告那是明文存储');
 });
 
 test('docs/PHONE.md：文档里让人执行的脚本路径必须真实存在', () => {

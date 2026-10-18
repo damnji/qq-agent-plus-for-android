@@ -6,22 +6,25 @@
 > 本页只讲手机端这条路线。**服务器**上的常规部署（systemd + Docker + SnowLuma）见
 > [LINUX.md](LINUX.md)；宝塔面板见 [BAOTA.md](BAOTA.md)。
 
-## 0. 先读这三条（踩过才知道的坑）
+## 0. 先读这四条（踩过才知道的坑）
 
-1. **本页的 `scripts/phone/install.sh` 一律指 `scripts/phone/install.sh`**。
+1. **`install.sh` 有两个，别跑错**。
+   本页所有命令里的 `install.sh` / `ctl.sh` 都指 `scripts/phone/` 下的手机版。
    仓库**根目录**也有一个 `install.sh`，那是**服务器**版（内部调 `deploy-all.sh`，
-   依赖 systemd + Docker）。在手机上执行 `bash scripts/phone/install.sh` 会失败 —— 必须写全路径：
+   依赖 systemd + Docker）。在手机上跑根目录那个会失败 —— 必须写全路径：
    `bash scripts/phone/install.sh`。
-2. **本项目手机端改动在一个单独的分支/仓库里，不在上游**。
-   上游 `sakurawwwxh/qq-agent-plus` **没有** `scripts/phone/` 这些文件。clone 时用
-   `damnji/qq-agent-plus-for-android`（见 §3.1），否则 `bash scripts/phone/install.sh`
-   会报 "No such file or directory"。
+2. **本页的仓库是私人仓库，匿名 clone 会失败**。
+   手机端改动在 `damnji/qq-agent-plus-for-android`（私有），
+   匿名 `git clone` 会卡在输入用户名密码；GitHub 加速站（ghfast.top 等）对私有仓库也无效。
+   按 §3 的三种方式之一取码（推荐 §3.1 电脑打包）。
+   另外：上游 `sakurawwwxh/qq-agent-plus` **没有** `scripts/phone/`，别去 clone 它。
 3. **`proot-distro install ubuntu` 装的是 latest，不是 24.04**。
    实测 2026-10 时它给的是 **26.04.1**。本页按 24.04 写（验证过的版本），
    所以要**显式指定版本**：`proot-distro install ubuntu:24.04`（见 §2.3）。
+4. **手机端默认不会说话**。装完是 `runtime.mode=observe`（只记录不发言）+ 白名单为空
+   （不回复任何群）。要它真的回消息，必须做 §6 里那三件事（模型 / 白名单 / 切 active）。
 
-
-## 0. 先看结论：三条路线
+## 0.1 先看结论：三条路线
 
 | 路线 | 手机要跑什么 | 需要什么 | 适合谁 |
 | --- | --- | --- | --- |
@@ -111,70 +114,134 @@ id -u             # 0（proot 伪装 root，但并不是真的 root）
 
 ## 3. 装本项目
 
-三种装法，按网络情况选。都在**容器内**执行。
+> ### ⚠️ 先说清楚：这是**私人仓库**
+>
+> `damnji/qq-agent-plus-for-android` 是私有仓库，**匿名 `git clone` 会要求用户名/密码**，
+> 手机上直接跑会在 `Username for 'https://github.com':` 那里卡住。
+> 而且**第三方 GitHub 加速（ghfast.top / gh-proxy 等）对私人仓库无效** ——
+> 它们只转发公开内容，不带你的凭据。
+>
+> 所以要按下面三种方式之一来（**推荐方式一**：不用在手机上放 token）。
 
-### 3.1 方式一：容器内直接拉（网络好时最省事）
+### 3.1 方式一：电脑打包传手机（**推荐，手机上不用放 token**）
 
-> ⚠️ **不要 clone 上游 `sakurawwwxh/qq-agent-plus`**：那是原版，**没有** `scripts/phone/`
-> 这一套手机端工具（本页所有命令都依赖它）。要用下面这个仓库。
+电脑上（Windows/macOS/Linux 都行；本项目依赖是纯 JS，x86 电脑装出来的 `node_modules`
+在 arm64 手机上照样能用）：
 
 ```bash
-apt-get update && apt-get install -y curl git ca-certificates tar xz-utils
-git clone https://github.com/damnji/qq-agent-plus-for-android.git /root/qq-agent-plus
-cd /root/qq-agent-plus
-
-# 注意路径：是 scripts/phone/install.sh，不是根目录那个 install.sh（那是服务器版）
-bash scripts/phone/install.sh
-```
-
-`scripts/phone/install.sh` 会自己下载 Node 22.22+（官方 arm64 包，多个国内镜像轮着试）、
-`npm ci` 装依赖、写 `data/config.json`、写安装记录。
-
-> 判断有没有搞错仓库/脚本，跑完这条命令看输出：
->
-> ```bash
-> ls scripts/phone/install.sh scripts/phone/install.sh
-> head -3 scripts/phone/install.sh
-> ```
->
-> - 只有 `install.sh`、没有 `scripts/phone/install.sh` ⇒ 你 clone 错了仓库（拿到的是上游原版）。
-> - `scripts/phone/install.sh` 第 2 行的注释应是「手机端（proot Ubuntu 24.04 arm64 容器内）一键安装」；
->   若看到「一键安装入口（"小白版"）」那是根目录的服务器版，路径写错了。
-
-> GitHub 直连不通时先配代理再用，例如：
-> `git clone https://ghfast.top/https://github.com/damnji/qq-agent-plus-for-android.git`
-
-### 3.2 方式二：电脑上准备好，整体拷进手机（**弱网/省流量推荐**）
-
-在电脑上（同样是 arm64 或任意 x86 都行，因为依赖是纯 JS）：
-
-```bash
+# 1) 电脑上克隆（这里会弹 GitHub 登录，用你的账号，或配好 SSH key）
 git clone https://github.com/damnji/qq-agent-plus-for-android.git
-cd qq-agent-plus-for-android && npm ci --omit=dev    # 只装运行时依赖，约 6MB
-tar -czf qq-agent-plus-with-deps.tar.gz --exclude=.git --exclude=data .
+cd qq-agent-plus-for-android
+
+# 2) 装好运行时依赖再打包（省得手机上下载）
+npm ci --omit=dev
+
+# 3) 打包：排除 .git 和 data/（data 里可能有你的密钥，别带过去）
+tar -czf qap.tar.gz --exclude=.git --exclude=data --exclude=node_modules .
+#   想连 node_modules 一起打包（手机完全不用联网装依赖）就去掉上面 --exclude=node_modules
 ```
 
-把 tar.gz 传到手机（微信文件传输助手 / USB / `adb push`），然后：
+把 `qap.tar.gz` 传到手机（微信文件传输助手 / USB / `adb push` / 局域网 `python -m http.server`），
+然后在**手机 Termux** 里：
 
 ```bash
-# 手机 Termux 里（注意：先放到 Termux 的私有目录，不要放 /sdcard）
-cp /sdcard/Download/qq-agent-plus-with-deps.tar.gz ~/
-cd ~ && mkdir -p qq-agent-plus && tar -xzf qq-agent-plus-with-deps.tar.gz -C qq-agent-plus
+# 放 Termux 私有目录（不要放 /sdcard，那里不能执行、权限也乱）
+cp /sdcard/Download/qap.tar.gz ~/
+mkdir -p ~/qq-agent-plus
+tar -xzf ~/qap.tar.gz -C ~/qq-agent-plus
 
+# 进容器，把目录 bind 进去（--bind 每次 login 都要带）
 proot-distro login ubuntu --bind ~/qq-agent-plus:/root/qq-agent-plus
-# 容器内：
+```
+
+容器内：
+
+```bash
 cd /root/qq-agent-plus
+# 带了 node_modules 就加 --offline-node-modules，否则让它联网装
 bash scripts/phone/install.sh --offline-node-modules /root/qq-agent-plus/node_modules
 ```
 
-`--offline-node-modules` 直接就绪，不再联网装包。
+> 优点：手机上没有 token、不怕 GitHub 被墙、包可以反复拷。
+> 缺点：每次更新要重新打包传一次。
 
-### 3.3 方式三：想改代码/跟着仓库更新
+### 3.2 方式二：手机容器内用脚本取（要一个 token，但一条命令）
 
-把仓库放 Termux 私有目录并 bind 进容器（`proot-distro login ubuntu --bind`），
-这样在 Termux 里 `git pull` 后容器内立刻可见。注意 `--bind` 每次 login 都要带。
+仓库自带 `scripts/phone/fetch.sh`，用 GitHub API 拉 tarball，**不需要 git**：
 
-### 3.4 装完你应该看到什么
+```bash
+# 容器内先具备基础工具
+apt-get update && apt-get install -y curl ca-certificates tar
+
+# token 只有这一次命令用得到，且**不会写进任何文件**
+GITHUB_TOKEN=ghp_你的token bash scripts/phone/fetch.sh /root/qq-agent-plus
+```
+
+但这里有个先有鸡还是先有蛋：`fetch.sh` 本身在仓库里，需要先把仓库弄下来。
+所以第一次要么用方式一（电脑打包），要么手动单文件 curl 一次：
+
+```bash
+# 只取这一个脚本（私有仓库：必须带 token，且不能用加速站）
+apt-get install -y curl ca-certificates
+curl -fL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -o /tmp/fetch.sh \
+  https://raw.githubusercontent.com/damnji/qq-agent-plus-for-android/main/scripts/phone/fetch.sh
+#   ↑ 若报 404，说明 raw.githubusercontent.com 对私有仓库需要 token 且你的 token 没权限，
+#     或该域名被墙 —— 那就直接用方式一。
+
+bash /tmp/fetch.sh /root/qq-agent-plus
+```
+
+token 要求：classic 勾 `repo`，或 fine-grained 只选这个仓库 + **Contents: Read-only**。
+用完请去 https://github.com/settings/tokens 吊销。
+
+> 优点：一条命令、手机端自足。
+> 缺点：手机上要临时放一个 token（虽然不落盘），且 `raw.githubusercontent.com` 常被墙。
+
+### 3.3 方式三：把 token 配进 git（能 `git pull`，但 token 会落盘）
+
+要长期在手机上 `git pull` 更新，就把凭据交给 git：
+
+```bash
+apt-get update && apt-get install -y curl git ca-certificates tar xz-utils
+
+# 用 credential store：第一次输入后 token 会明文存在 ~/.git-credentials
+git config --global credential.helper store
+git clone https://github.com/damnji/qq-agent-plus-for-android.git /root/qq-agent-plus
+# Username 填你的 GitHub 用户名，Password 填 token（不是账号密码，GitHub 已不支持密码推送）
+# 之后 git pull 就不用再输
+
+cd /root/qq-agent-plus
+bash scripts/phone/install.sh
+```
+
+> ⚠️ `~/.git-credentials` 里是**明文 token**。手机上尤其要：
+> - 用**只读**的细粒度 token（Contents: Read-only）——反正手机只 pull 不 push；
+> - 设短有效期；
+> - 别把这个文件同步到网盘/备份。
+>
+> 更安全的等价做法是把 token 写进 URL 的一次性形式（不落盘，但每次要带）：
+> `git clone https://<用户名>:<token>@github.com/damnji/qq-agent-plus-for-android.git`
+
+### 3.4 三种方式怎么选
+
+| 场景 | 选 |
+| --- | --- |
+| 手机网络一般 / 不想在手机上放 token | **3.1 电脑打包** |
+| 手机能连 GitHub API、愿意临时给个只读 token | 3.2 `fetch.sh` |
+| 要长期 `git pull` 跟着更新 | 3.3 credential store（配只读 token） |
+
+> 无论哪种，装完都做一次自检，确认拿到的是**带手机端工具链**的那份：
+>
+> ```bash
+> ls install.sh scripts/phone/install.sh    # 两个都应该在
+> head -3 scripts/phone/install.sh          # 第 2 行应是「手机端（proot Ubuntu 24.04 ...）」
+> ```
+>
+> - 只有 `install.sh`、没有 `scripts/phone/install.sh` ⇒ 拿到的是**上游原版**（没有手机端工具）。
+> - 看到「一键安装入口（"小白版"）」⇒ 那是根目录的**服务器版**，路径写错了。
+
+### 3.5 装完你应该看到什么
 
 ```
 === 完成。接下来三步 ===
