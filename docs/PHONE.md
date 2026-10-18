@@ -1,10 +1,25 @@
-# 手机端部署（安卓 + proot Ubuntu 24.04 arm64）
+# 手机端部署（安卓 + proot Ubuntu arm64）
 
 > 目标：在**一台安卓手机上**跑起 `qq-agent-plus`：App 内一个 proot 容器（Ubuntu 24.04 arm64）
 > 里同时跑协议端 NapCat 和本项目，扫码登录 QQ 后群里就能对话。不需要电脑、不需要服务器。
 >
 > 本页只讲手机端这条路线。**服务器**上的常规部署（systemd + Docker + SnowLuma）见
 > [LINUX.md](LINUX.md)；宝塔面板见 [BAOTA.md](BAOTA.md)。
+
+## 0. 先读这三条（踩过才知道的坑）
+
+1. **本页的 `scripts/phone/install.sh` 一律指 `scripts/phone/install.sh`**。
+   仓库**根目录**也有一个 `install.sh`，那是**服务器**版（内部调 `deploy-all.sh`，
+   依赖 systemd + Docker）。在手机上执行 `bash scripts/phone/install.sh` 会失败 —— 必须写全路径：
+   `bash scripts/phone/install.sh`。
+2. **本项目手机端改动在一个单独的分支/仓库里，不在上游**。
+   上游 `sakurawwwxh/qq-agent-plus` **没有** `scripts/phone/` 这些文件。clone 时用
+   `damnji/qq-agent-plus-for-android`（见 §3.1），否则 `bash scripts/phone/install.sh`
+   会报 "No such file or directory"。
+3. **`proot-distro install ubuntu` 装的是 latest，不是 24.04**。
+   实测 2026-10 时它给的是 **26.04.1**。本页按 24.04 写（验证过的版本），
+   所以要**显式指定版本**：`proot-distro install ubuntu:24.04`（见 §2.3）。
+
 
 ## 0. 先看结论：三条路线
 
@@ -62,10 +77,12 @@ termux-wake-lock          # 让系统别在息屏时冻结 Termux（非常重要
 
 > `termux-wake-lock` 每次重启手机后要重打一次；也可以用 Termux 的通知栏「Acquire wakelock」。
 
-### 2.3 装容器
+### 2.3 装容器（**要指定版本**）
 
 ```bash
-proot-distro install ubuntu          # 约 100MB，装的是 Ubuntu 24.04 arm64
+# ⚠️ 不要写 `proot-distro install ubuntu`：那装的是 latest（实测 2026-10 为 26.04.1），
+#    不是本页验证过的 24.04。要显式带版本号。
+proot-distro install ubuntu:24.04
 proot-distro login ubuntu
 ```
 
@@ -73,9 +90,21 @@ proot-distro login ubuntu
 
 ```bash
 uname -m          # aarch64
-. /etc/os-release && echo "$PRETTY_NAME"   # Ubuntu 24.04.x LTS
+. /etc/os-release && echo "$PRETTY_NAME"   # 应是 Ubuntu 24.04.x LTS
 id -u             # 0（proot 伪装 root，但并不是真的 root）
 ```
+
+如果 `$PRETTY_NAME` 打出来是 26.04 或别的大版本，说明装成了 latest。
+删掉重装：`proot-distro remove ubuntu && proot-distro install ubuntu:24.04`。
+
+> 为什么强调版本：本项目的产物只在 24.04 上实测过（见 `docs/PHONE.md` 与仓库
+> `scripts/phone/`）。26.04 的 `apt` 源、软件包名（例如 `libasound2t64`）与
+> 24.04 有差异，NapCat 安装器的依赖列表是按 24.04 写的，跨版本容易卡在装依赖。
+> 想用 26.04 的话，把 `scripts/phone/install.sh` 与 NapCat 安装器报的缺包逐个补齐——可以跑，但要自己排。
+>
+> `proot-distro install ubuntu:24.04` 需要你的 proot-distro 是**新版本**（OCI 镜像那一代）。
+> 老版本（插件式，只有 `ubuntu` 一个名字、不带版本）请先在 Termux 里 `pkg upgrade proot-distro`。
+
 
 > 容器里 `id -u` 是 0 只是伪装。**不要**在里面跑 `systemctl`（没有）、
 > 也不要指望 `apt` 装的服务能开机自启（重启手机就没了，靠 §5 的守护脚本）。
@@ -86,26 +115,42 @@ id -u             # 0（proot 伪装 root，但并不是真的 root）
 
 ### 3.1 方式一：容器内直接拉（网络好时最省事）
 
+> ⚠️ **不要 clone 上游 `sakurawwwxh/qq-agent-plus`**：那是原版，**没有** `scripts/phone/`
+> 这一套手机端工具（本页所有命令都依赖它）。要用下面这个仓库。
+
 ```bash
 apt-get update && apt-get install -y curl git ca-certificates tar xz-utils
-git clone https://github.com/sakurawwwxh/qq-agent-plus.git /root/qq-agent-plus
+git clone https://github.com/damnji/qq-agent-plus-for-android.git /root/qq-agent-plus
 cd /root/qq-agent-plus
+
+# 注意路径：是 scripts/phone/install.sh，不是根目录那个 install.sh（那是服务器版）
 bash scripts/phone/install.sh
 ```
 
-`install.sh` 会自己下载 Node 22.22+（官方 arm64 包，多个国内镜像轮着试）、
+`scripts/phone/install.sh` 会自己下载 Node 22.22+（官方 arm64 包，多个国内镜像轮着试）、
 `npm ci` 装依赖、写 `data/config.json`、写安装记录。
 
+> 判断有没有搞错仓库/脚本，跑完这条命令看输出：
+>
+> ```bash
+> ls scripts/phone/install.sh scripts/phone/install.sh
+> head -3 scripts/phone/install.sh
+> ```
+>
+> - 只有 `install.sh`、没有 `scripts/phone/install.sh` ⇒ 你 clone 错了仓库（拿到的是上游原版）。
+> - `scripts/phone/install.sh` 第 2 行的注释应是「手机端（proot Ubuntu 24.04 arm64 容器内）一键安装」；
+>   若看到「一键安装入口（"小白版"）」那是根目录的服务器版，路径写错了。
+
 > GitHub 直连不通时先配代理再用，例如：
-> `git clone https://ghfast.top/https://github.com/sakurawwwxh/qq-agent-plus.git`
+> `git clone https://ghfast.top/https://github.com/damnji/qq-agent-plus-for-android.git`
 
 ### 3.2 方式二：电脑上准备好，整体拷进手机（**弱网/省流量推荐**）
 
 在电脑上（同样是 arm64 或任意 x86 都行，因为依赖是纯 JS）：
 
 ```bash
-git clone https://github.com/sakurawwwxh/qq-agent-plus.git
-cd qq-agent-plus && npm ci --omit=dev        # 只装运行时依赖，约 6MB
+git clone https://github.com/damnji/qq-agent-plus-for-android.git
+cd qq-agent-plus-for-android && npm ci --omit=dev    # 只装运行时依赖，约 6MB
 tar -czf qq-agent-plus-with-deps.tar.gz --exclude=.git --exclude=data .
 ```
 
@@ -297,7 +342,7 @@ bash scripts/phone/ctl.sh status
 
 - 起 `node src/server.js`，退出就 5 秒后重起（≈ `Restart=always`）；
 - 60 秒内连续秒退 10 次就退避 60 秒并打日志（配置写错时不会把手机烧热）；
-- `ctl.sh stop` 时先 `SIGTERM` 给 node（server.js 自己会优雅关闭 sqlite），30 秒不退才 `kill -9`。
+- `scripts/phone/ctl.sh stop` 时先 `SIGTERM` 给 node（server.js 自己会优雅关闭 sqlite），30 秒不退才 `kill -9`。
 
 常用命令：
 
@@ -314,15 +359,15 @@ bash scripts/phone/ctl.sh backup      # 备份 data/（会先 WAL checkpoint）
 
 ## 6. 首次配置（**不做这步它不会说话**）
 
-浏览器打开 `http://127.0.0.1:3210`（或 `ctl.sh token` 打印的 URL）。
+浏览器打开 `http://127.0.0.1:3210`（或 `scripts/phone/ctl.sh token` 打印的 URL）。
 
 三件事必须做，少一件就「收得到消息但不回复」：
 
 | 项目 | 在哪 | 不做的后果 |
 | --- | --- | --- |
-| **模型**（baseUrl / apiKey / model） | 控制台「设置 → 模型」，或 `install.sh --model-base-url/--model-api-key/--model` | 日志打印 `模型: （未设置，请在设置里选择）`，永不回复 |
-| **群白名单** | 控制台「允许的群」，或 `ctl.sh allow <群号>` | 白名单为空时**默认不回复任何群**（安全默认） |
-| **运行模式 → active** | 控制台右上角，或 `ctl.sh mode active` | 默认 `observe`：只记录、不发言 |
+| **模型**（baseUrl / apiKey / model） | 控制台「设置 → 模型」，或 `scripts/phone/install.sh --model-base-url/--model-api-key/--model` | 日志打印 `模型: （未设置，请在设置里选择）`，永不回复 |
+| **群白名单** | 控制台「允许的群」，或 `scripts/phone/ctl.sh allow <群号>` | 白名单为空时**默认不回复任何群**（安全默认） |
+| **运行模式 → active** | 控制台右上角，或 `scripts/phone/ctl.sh mode active` | 默认 `observe`：只记录、不发言 |
 
 命令行走一遍最快：
 
@@ -340,7 +385,7 @@ OneBot   : 已连接
 模型     : deepseek-chat
 ```
 
-然后往群里发一句「在吗」，`ctl.sh logs -f` 里应出现 `[发送 -> group:...] ...`。
+然后往群里发一句「在吗」，`scripts/phone/ctl.sh logs -f` 里应出现 `[发送 -> group:...] ...`。
 
 > 触发概率默认是 **100%（任何消息都回）**。觉得太吵就去控制台把滑条往下调；
 > 调到 0 就只剩「被 @」和「命中关键词」才回。**被 @ 永远必回，不受概率影响。**
@@ -380,9 +425,10 @@ OneBot   : 已连接
 ### 7.3 最小可行壳（建议顺序）
 
 1. **先不做 UI**：一个 Activity，启动后台 Service，Service 里 `Runtime.exec` 一段 shell：
-   解压 rootfs（assets）→ 跑 `install.sh`（把仓库打进 assets 或用 `--offline-node-modules`）→
-   跑 `ctl.sh start` → WebView 开 `127.0.0.1:3210`。这样 200 行 Java 就够。
-2. 再加「环境管理」页（显示安装进度：`install.sh` 已经可以把进度打到 stdout，壳里读流即可）。
+   解压 rootfs（assets）→ 跑 `scripts/phone/install.sh`（把仓库打进 assets 或用 `--offline-node-modules`）→
+   跑 `scripts/phone/ctl.sh start` → WebView 开 `127.0.0.1:3210`。这样 200 行 Java 就够。
+2. 再加「环境管理」页（显示安装进度：`scripts/phone/install.sh` 已经把进度打到 stdout，
+   壳里读流即可）。
 3. 最后再考虑多账号/多实例（每实例独立 `HOME`/`NAPCAT_WORKDIR`/`DISPLAY`，
    泡泡版的 `launcher2.sh` 就是这套做法）。
 
@@ -395,12 +441,12 @@ OneBot   : 已连接
 | 层 | 做法 |
 | --- | --- |
 | Termux 本身 | `termux-wake-lock`；Termux 设置里「Acquire wakelock」；电池优化白名单 |
-| 容器进程 | `ctl.sh start` 的守护循环（5 秒重起 + 快速失败退避） |
+| 容器进程 | `scripts/phone/ctl.sh start` 的守护循环（5 秒重起 + 快速失败退避） |
 | 安卓系统 | 允许 App/服务「后台运行」「自启动」；Android 13+ 要允许通知（前台服务通知） |
 | 息屏断网 | 关掉「电池优化」「睡眠模式」「智能省流量」；Wi-Fi 设置里允许后台数据 |
 
 自检方法：拔掉充电器、锁屏 30 分钟，然后回来看
-`ctl.sh status` 是否还是「已连接」、`/sdcard/qq-agent` 下的日志是否连续。
+`scripts/phone/ctl.sh status` 是否还是「已连接」、`/sdcard/qq-agent` 下的日志是否连续。
 
 ## 9. 备份与迁移
 
@@ -422,17 +468,17 @@ NapCat 侧要一起备份 `$NAPCAT_WORKDIR`（含登录态与 `onebot11_<uin>.js
 先跑 **`bash scripts/phone/ctl.sh doctor`**，它会逐项检查并把结论打出来。
 下面是常见症状对照。
 
-### 10.1 控制台打不开 / `ctl.sh status` 显示 HTTP 000
+### 10.1 控制台打不开 / `scripts/phone/ctl.sh status` 显示 HTTP 000
 
 ```bash
 bash scripts/phone/ctl.sh logs 80
 ```
 
-- `listen EADDRINUSE` → 端口被占：`ctl.sh stop` 后 `ps aux | grep server.js` 清残留，
+- `listen EADDRINUSE` → 端口被占：`scripts/phone/ctl.sh stop` 后 `ps aux | grep server.js` 清残留，
   或改 `data/config.json` 的 `server.port`；
 - `当前 Node 不支持 node:sqlite` → Node 太旧（Ubuntu 24.04 自带的是 18）。
-  跑 `install.sh` 让它下 Node 22；或手动指 `--node-dir`；
-- 直接 `Error: Cannot find package 'ws'` → `node_modules` 没装好，重跑 `install.sh`。
+  跑 `scripts/phone/install.sh` 让它下 Node 22；或手动指 `--node-dir`；
+- 直接 `Error: Cannot find package 'ws'` → `node_modules` 没装好，重跑 `scripts/phone/install.sh`。
 
 ### 10.2 控制台能开，但 `OneBot: 未连接`
 
@@ -450,13 +496,13 @@ bash scripts/phone/ctl.sh logs 80
 
 按顺序排（这几条 `doctor` 都会提示）：
 
-1. `runtime.mode` 还是 `observe` → `ctl.sh mode active`；
-2. 群不在白名单 → `ctl.sh allow <群号>`；
-3. 没配模型 → 控制台填 baseUrl/apiKey/model，或重跑 `install.sh --model-*`；
+1. `runtime.mode` 还是 `observe` → `scripts/phone/ctl.sh mode active`；
+2. 群不在白名单 → `scripts/phone/ctl.sh allow <群号>`；
+3. 没配模型 → 控制台填 baseUrl/apiKey/model，或重跑 `scripts/phone/install.sh --model-*`；
 4. 触发概率被调成 0 且没 @ 它 → 控制台把滑条往上（或直接 @ 一次试试，@ 必回）；
 5. `chatKey` 不对（比如白名单填的是私聊号）→ 看日志里的 `group:<号>`。
 
-日志特征（`ctl.sh logs -f`）：
+日志特征（`scripts/phone/ctl.sh logs -f`）：
 
 - `未命中触发条件（概率 N%）` = 白名单与模式都对，只是概率没抽中；
 - `[wake]` 之后没有任何 `[发送 -> ...]` = 跑了模型但没产出（模型/Key 有问题）；
@@ -471,9 +517,9 @@ bash scripts/phone/ctl.sh logs 80
 
 ### 10.5 手机越用越卡 / 被系统杀掉
 
-- 看 `ctl.sh status` 里今日用量与内存：`free -m`；
+- 看 `scripts/phone/ctl.sh status` 里今日用量与内存：`free -m`；
 - 关掉不用的功能（表情库、语音转写、主动发言）能显著降内存；
-- `data/messages.sqlite` 会随聊天增长，定期 `ctl.sh backup` 后清理旧会话
+- `data/messages.sqlite` 会随聊天增长，定期 `scripts/phone/ctl.sh backup` 后清理旧会话
   （控制台「存档」页可删）。
 
 ## 11. 安全提示
@@ -497,5 +543,5 @@ bash scripts/phone/ctl.sh logs 80
 | 数据 | `data/`（建议指到 `/sdcard`） | `--data-dir`，通常 `/var/lib/qq-agent` |
 
 > 手机端**不要**开 `autoUpdate`：它会 `systemctl --user restart`，proot 里没有 systemd，
-> 更新会失败并把服务停在那儿。要更新就：`ctl.sh stop` → `git pull` → `install.sh` →
-> `ctl.sh start`。
+> 更新会失败并把服务停在那儿。要更新就：`scripts/phone/ctl.sh stop` → `git pull` → `scripts/phone/install.sh` →
+> `scripts/phone/ctl.sh start`。

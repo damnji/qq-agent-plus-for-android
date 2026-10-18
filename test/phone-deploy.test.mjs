@@ -219,6 +219,72 @@ test('NapCat 模板用 websocketServers（正向），不能是 websocketClients
   assert.ok(typeof http.token === 'string' && http.token.length > 0);
 });
 
+test('docs/PHONE.md：文档里让人执行的脚本路径必须真实存在', () => {
+  // 2026-10-18 实测踩到：文档写 `bash install.sh`，但仓库根目录的 install.sh 是
+  // **服务器版**（内部调 deploy-all.sh，要 systemd+Docker），手机版在 scripts/phone/。
+  // 而且 clone 地址若写成上游仓库，那份里根本没有 scripts/phone/ —— 用户照着抄必然失败。
+  // 这条用例把「文档里提到的脚本路径」与「磁盘上真实存在的文件」锁在一起。
+  const source = fs.readFileSync(path.join(repo, 'docs', 'PHONE.md'), 'utf8');
+  const referenced = new Set();
+  for (const m of source.matchAll(/\b(scripts\/phone\/[\w.-]+\.(?:sh|mjs))\b/g)) referenced.add(m[1]);
+  assert.ok(referenced.size >= 3,
+    `文档应至少引用 install.sh / ctl.sh，实际只找到：${[...referenced].join(', ') || '无'}`);
+  for (const rel of referenced) {
+    assert.ok(fs.existsSync(path.join(repo, rel)), `docs/PHONE.md 引用了不存在的脚本：${rel}`);
+  }
+  // install.sh 与 ctl.sh 必须被引用（这是用户唯一入口）
+  assert.ok(referenced.has('scripts/phone/install.sh'), '文档必须告诉用户跑 scripts/phone/install.sh');
+  assert.ok(referenced.has('scripts/phone/ctl.sh'), '文档必须告诉用户跑 scripts/phone/ctl.sh');
+});
+
+test('docs/PHONE.md：不能让人在仓库根目录直接跑 bash install.sh（那是服务器版）', () => {
+  const source = fs.readFileSync(path.join(repo, 'docs', 'PHONE.md'), 'utf8');
+  // 根目录 install.sh 存在且是服务器版，手机端用了会因缺 systemd/docker 失败。
+  // 允许它出现在"这是服务器版、别用"这类对照说明里，但不允许作为可执行命令出现。
+  const lines = source.split('\n');
+  const offenders = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!/\bbash install\.sh\b/.test(line)) continue;
+    // 允许的两种"故意提到根目录 install.sh"：
+    //   1) §12 对照表里的服务器列（形如 `bash install.sh`（= deploy-all.sh --yes））
+    //   2) "这是服务器版/别用"类说明
+    if (/`bash install\.sh`\s*[（(]\s*=\s*`?deploy-all\.sh/.test(line)) continue;
+    if (/根目录|服务器版|别用|不要|没有/.test(line)) continue;
+    offenders.push(`第 ${i + 1} 行: ${line.trim()}`);
+  }
+  assert.deepEqual(offenders, [],
+    `手机端文档不能让人裸跑根目录的 install.sh（那是服务器版），应写 scripts/phone/install.sh：\n${offenders.join('\n')}`);
+});
+
+test('docs/PHONE.md：proot-distro 必须指定版本（install ubuntu 拿到的是 latest）', () => {
+  // 实测 2026-10：`proot-distro install ubuntu` 装的是 latest = 26.04.1，
+  // 而手机端只在 24.04 上验证过。文档必须给带版本号的写法。
+  const source = fs.readFileSync(path.join(repo, 'docs', 'PHONE.md'), 'utf8');
+  assert.match(source, /proot-distro install ubuntu:24\.04/,
+    '必须给出 `proot-distro install ubuntu:24.04`（不带版本号装的是 latest）');
+  // 裸 `proot-distro install ubuntu`（后面不跟 :版本）只能作为反例出现
+  const bad = source.split('\n')
+    .map((line, i) => ({ line, n: i + 1 }))
+    .filter(({ line }) => /proot-distro install ubuntu(?![:@\w])/.test(line))
+    .filter(({ line }) => !/(不要写|不是|装的是|latest|反例|⚠️)/.test(line));
+  assert.deepEqual(bad.map((b) => `第 ${b.n} 行: ${b.line.trim()}`), [],
+    '不能让人裸跑 `proot-distro install ubuntu`（会装成 latest 而非 24.04）');
+});
+
+test('docs/PHONE.md：clone 地址必须是带手机端改动的那份仓库', () => {
+  // 上游 sakurawwwxh/qq-agent-plus 没有 scripts/phone/，clone 它必然 "No such file or directory"
+  const source = fs.readFileSync(path.join(repo, 'docs', 'PHONE.md'), 'utf8');
+  const cloneLines = source.split('\n').filter((line) => /git clone\s+https:\/\//.test(line));
+  assert.ok(cloneLines.length > 0, '文档里应给出 git clone 命令');
+  const wrong = cloneLines.filter((line) => line.includes('sakurawwwxh/qq-agent-plus.git')
+    && !/不要|上游|没有/.test(line));
+  assert.deepEqual(wrong, [],
+    `clone 地址指向上游原版（没有 scripts/phone/），应换成带手机端改动的仓库：\n${wrong.join('\n')}`);
+  assert.ok(source.includes('damnji/qq-agent-plus-for-android'),
+    '文档应指向含手机端工具链的仓库');
+});
+
 test('docs/PHONE.md 覆盖了手机路线的关键约束', () => {
   const file = path.join(repo, 'docs', 'PHONE.md');
   assert.ok(fs.existsSync(file), '缺 docs/PHONE.md');

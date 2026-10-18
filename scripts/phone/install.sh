@@ -292,7 +292,8 @@ cat <<EOS
 3) 打开控制台：http://127.0.0.1:$REAL_CONSOLE_PORT
    手机同机浏览器/WebView 直接访问即可（proot 共享宿主网络）。
    首次要填：模型（baseUrl/apiKey/model）、群白名单、把运行模式从 observe 切到 active，
-   否则**只记录不发言**。命令行走 ctl.sh mode active / ctl.sh allow <群号> 也行。
+   否则**只记录不发言**。命令行走 `bash scripts/phone/ctl.sh mode active` 与
+   `bash scripts/phone/ctl.sh allow <群号>` 也行。
 
 排障：bash scripts/phone/ctl.sh doctor
 EOS
