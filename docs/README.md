@@ -7,6 +7,7 @@
 | 文档 | 说明 |
 | --- | --- |
 | [LINUX.md](LINUX.md) | Linux 全栈部署与运维手册：隔离边界、依赖、安装（一键 `install.sh` / 交互式 `deploy-all.sh`）、控制台、数据与备份、OneBot 连接故障排查 |
+| [PHONE.md](PHONE.md) | 手机端部署（安卓 + proot Ubuntu 24.04 arm64）：Termux 路线、容器内 NapCat 配置（正向 WS + HTTP）、`scripts/phone/` 一键装与守护、保活、排障、APK 壳路线 |
 | [BAOTA.md](BAOTA.md) | 宝塔 / aaPanel 面板部署：面板与 systemd 的分工、非 root 服务用户、端口与反向代理、常见报错 |
 | [OPS.md](OPS.md) | `src/ops.js` 运维入口（体检 / 扫描 / 备份 / 部署 / 看门狗 / 健康巡检 / 隧道）的环境变量与示例 |
 | [CONFIG-EXAMPLES.md](CONFIG-EXAMPLES.md) | 常用配置片段：思考模式、兜底模型、视觉、主动发言、表情包、节奏 |

@@ -1,0 +1,58 @@
+{
+  "_comment": [
+    "NapCat 的 OneBot11 配置模板（手机端 / 单机部署）。",
+    "落盘位置：$NAPCAT_WORKDIR/config/onebot11.json，首次登录后 NapCat 会复制成 onebot11_<QQ号>.json，",
+    "实际生效的是带 QQ 号的那份；改了没生效就两份都改，或直接改带 QQ 号的那份。",
+    "",
+    "为什么是 websocketServers 而不是 websocketClients：",
+    "  qq-agent-plus 是 OneBot 的「客户端」角色——它主动连出去收事件（wsUrl），再走 HTTP 发动作（httpUrl）。",
+    "  所以 NapCat 必须当服务端（开 websocketServers + httpServers）。",
+    "  AstrBot 那类框架是服务端角色，NapCat 那边才配 websocketClients（反向 WS）——别照抄。",
+    "",
+    "token 必须与 qq-agent-plus 的 data/config.json 里 onebot.accessToken / httpAccessToken 一致。",
+    "NapCat 的 HTTP 鉴权失败返回 403（不是 401），看到 403 + token verify failed! 就是 token 不一致。"
+  ],
+  "network": {
+    "httpServers": [
+      {
+        "name": "qq-agent-http",
+        "enable": true,
+        "host": "127.0.0.1",
+        "port": 3000,
+        "enableCors": true,
+        "enableWebsocket": false,
+        "messagePostFormat": "array",
+        "token": "REPLACE_WITH_A_LONG_RANDOM_TOKEN",
+        "debug": false
+      }
+    ],
+    "httpSseServers": [],
+    "httpClients": [],
+    "websocketServers": [
+      {
+        "name": "qq-agent-ws",
+        "enable": true,
+        "host": "127.0.0.1",
+        "port": 3001,
+        "messagePostFormat": "array",
+        "reportSelfMessage": false,
+        "token": "REPLACE_WITH_A_LONG_RANDOM_TOKEN",
+        "enableForcePushEvent": true,
+        "debug": false,
+        "heartInterval": 30000
+      }
+    ],
+    "websocketClients": [],
+    "plugins": []
+  },
+  "musicSignUrl": "",
+  "enableLocalFile2Url": false,
+  "parseMultMsg": false,
+  "imageDownloadProxy": "",
+  "timeout": {
+    "baseTimeout": 10000,
+    "uploadSpeedKBps": 256,
+    "downloadSpeedKBps": 256,
+    "maxTimeout": 1800000
+  }
+}
