@@ -247,26 +247,36 @@ test('fetch.sh：对私有仓库给的是 token/tarball 路线，不能让人裸
   }
 });
 
-test('docs/PHONE.md：必须说明这是私人仓库、匿名 clone 会失败', () => {
-  const source = fs.readFileSync(path.join(repo, 'docs', 'PHONE.md'), 'utf8');
-  // 用户实测反馈：文档给 `git clone` 但仓库是私人的，手机上会卡在输密码
-  assert.match(source, /私人仓库|私有仓库/, '文档应明确说明仓库是私人的');
-  assert.match(source, /(匿名|直接)\s*(`?git clone`?|clone)/,
-    '文档应说明匿名 git clone 会要求凭据/失败');
-  // 加速站对私有仓库无效 —— 这条很容易踩，必须写
-  assert.match(source, /(加速|ghfast|gh-proxy)[^\n]*(无效|不带|只转发)/,
-    '文档应说明第三方 GitHub 加速对私人仓库无效');
-  // 至少要给出一条不需要在手机上放 token 的路线
-  assert.match(source, /(电脑|本机|桌面)[^\n]*(打包|tar)[^\n]*(传|拷)/,
-    '文档应给出「电脑打包传手机」这条不需要手机放 token 的路线');
+test('fetch.sh：公开仓库匿名可用，私有 fork 才要 token', () => {
+  const source = read('fetch.sh');
+  // 仓库已公开（2026-10-18 起），fetch.sh 不能强制要求 token，否则用户白折腾
+  assert.match(source, /探测仓库可见性|anon_code/, 'fetch.sh 应先匿名探测仓库是否公开');
+  assert.match(source, /公开仓库，匿名即可下载|不需要 token/,
+    'fetch.sh 应说明公开仓库不需要 token');
+  // 仍要保留私有 fork 的路径（--owner/--repo 指向私有仓库时）
+  assert.match(source, /私有 fork|私有/, 'fetch.sh 应仍支持私有 fork（带 token）');
+  // 匿名下载时不能把 token 发出去
+  assert.match(source, /if \[ -n "\$TOKEN" \]; then[\s\S]{0,120}Authorization/,
+    '只有给了 token 才应带 Authorization，公开仓库匿名下载不该发凭据');
 });
 
-test('docs/PHONE.md：token 安全提示到位', () => {
+test('docs/PHONE.md：说明仓库是公开的，并给出加速站用法', () => {
   const source = fs.readFileSync(path.join(repo, 'docs', 'PHONE.md'), 'utf8');
-  assert.match(source, /settings\/tokens/, '应给出 token 管理页面地址');
-  assert.match(source, /(吊销|revoke)/i, '应提醒用完吊销 token');
-  assert.match(source, /(只读|Read-only)/i, '应建议手机上用只读 token');
-  assert.match(source, /明文/, '用 credential store 时应警告那是明文存储');
+  // 仓库 2026-10-18 转为公开，文档必须同步（原来写的是"私人仓库需要 token"）
+  assert.match(source, /公开|public/i, '文档应说明仓库是公开的');
+  assert.ok(!/这是\*\*私人仓库\*\*/.test(source),
+    '仓库已公开，不应再写「这是私人仓库……匿名 clone 会失败」');
+  // 国内常需要加速站，公开仓库后可用了
+  assert.match(source, /ghfast\.top/, '应给出 GitHub 加速站用法（公开仓库可用）');
+});
+
+test('docs/PHONE.md：token 相关说明仍然安全（若提及）', () => {
+  const source = fs.readFileSync(path.join(repo, 'docs', 'PHONE.md'), 'utf8');
+  // 公开仓库默认不需要 token；只在"私有 fork"这种场景才提
+  if (source.includes('GITHUB_TOKEN')) {
+    assert.match(source, /私有 fork|私有/, '提到 token 时应说明是为私有 fork');
+    assert.match(source, /环境变量/, '应说明 token 走环境变量而非命令行');
+  }
 });
 
 test('docs/PHONE.md：文档里让人执行的脚本路径必须真实存在', () => {
