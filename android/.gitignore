@@ -1,0 +1,34 @@
+# APK 构建产物与大体积中间文件（不入库）
+#
+# 为什么不入库：
+#   - assets/*.tar.gz 合计 74MB（rootfs 28MB + Node 42MB），GitHub 单文件建议 <50MB，
+#     且这些东西可由 build-assets.sh 完全重建；
+#   - build/ 是中间产物；
+#   - dist/*.apk 是构建结果（要发布就发 Release，不要塞进 git 历史 ——
+#     每换一版就多 75MB，仓库很快就不可用了）；
+#   - keystore/ 是签名私钥，**绝对不能**入库（泄露=别人能冒充你的更新）。
+
+# 构建中间产物
+build/
+
+# 打包进 APK 的素材（由 build-assets.sh 生成）
+app/assets/*.tar.gz
+app/assets/*.tar.xz
+
+# 构建结果
+dist/
+
+# 签名密钥：绝不入库
+keystore/
+*.jks
+*.keystore
+
+# 图标生成器的编译产物（源码 IconGen.cs 保留）
+IconGen.exe
+IconGen.pdb
+
+# IDE
+.idea/
+*.iml
+.gradle/
+local.properties
